@@ -1,0 +1,56 @@
+# docker-compose.yml
+# ─────────────────────────────────────────────────────────────────────────────
+#  Runs the complete stack locally with a single command:
+#    docker compose up --build
+#
+#  Services:
+#    media-server  →  Node.js backend + RTMP ingest (ports 3001, 1935)
+#    client        →  React dev server (port 5173)
+# ─────────────────────────────────────────────────────────────────────────────
+version: '3.9'
+
+services:
+  # ── Backend: Express + Socket.IO + node-media-server ───────────────────────
+  media-server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: camwatch-server
+    restart: unless-stopped
+    ports:
+      - "3001:3001"    # HTTP / Socket.IO / HLS
+      - "1935:1935"    # RTMP ingest from camera box
+    env_file: ./server/.env
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - RTMP_PORT=1935
+      - HLS_PATH=/tmp/hls
+      - ALLOWED_ORIGINS=http://localhost:5173
+    volumes:
+      - hls_data:/tmp/hls
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Frontend: React + Vite dev server ──────────────────────────────────────
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile.dev
+    container_name: camwatch-client
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:3001
+      - VITE_SOCKET_URL=http://localhost:3001
+    depends_on:
+      - media-server
+    volumes:
+      - ./client/src:/app/src  # hot-reload
+
+volumes:
+  hls_data:

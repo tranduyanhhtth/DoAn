@@ -1,0 +1,33 @@
+# render.yaml  — Render.com Infrastructure as Code
+# Docs: https://render.com/docs/blueprint-spec
+# Push this file to your repo; Render auto-detects it on first deploy.
+services:
+  - type: web
+    name: camwatch-server
+    env: node
+    region: singapore      # closest to Vietnam
+    plan: free             # free tier (sleeps after 15 min idle → upgrade for production)
+    rootDir: server
+    buildCommand: npm ci
+    startCommand: node src/index.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000          # Render assigns 10000 internally
+      - key: RTMP_PORT
+        value: 1935
+        # ⚠️  NOTE: Render free tier does NOT expose TCP port 1935.
+        #     You need a paid plan or a separate VPS for RTMP ingest.
+        #     See README "Deployment strategy" for details.
+      - key: HLS_PATH
+        value: /tmp/hls
+      - key: FFMPEG_PATH
+        value: /usr/bin/ffmpeg
+      - key: ALLOWED_ORIGINS
+        sync: false           # fill in Render dashboard (your Vercel URL)
+      - key: STREAM_SECRET
+        sync: false           # optional, set in dashboard
+      - key: ADMIN_PASSWORD
+        sync: false

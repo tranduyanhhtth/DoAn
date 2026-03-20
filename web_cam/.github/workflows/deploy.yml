@@ -1,0 +1,102 @@
+# .github/workflows/deploy.yml
+# ─────────────────────────────────────────────────────────────────────────────
+#  CI/CD Pipeline
+#
+#  On push to `main`:
+#    1. Lint + build check
+#    2. Trigger Render (backend) re-deploy via deploy hook
+#    3. Vercel CLI deploys the React frontend (production)
+#
+#  Required GitHub Secrets:
+#    RENDER_DEPLOY_HOOK_URL    – from Render dashboard → Service → Deploy Hooks
+#    VERCEL_TOKEN              – from vercel.com → Settings → Tokens
+#    VERCEL_ORG_ID             – run `vercel whoami --token=<token>` to get
+#    VERCEL_PROJECT_ID         – from .vercel/project.json after first link
+#    VITE_API_URL              – your Render backend public URL
+#    VITE_SOCKET_URL           – same as VITE_API_URL
+# ─────────────────────────────────────────────────────────────────────────────
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # ── 1. Lint & build ─────────────────────────────────────────────────────────
+  build:
+    name: Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: |
+            server/package-lock.json
+            client/package-lock.json
+
+      - name: Install server deps
+        run: cd server && npm ci
+
+      - name: Install client deps
+        run: cd client && npm ci
+
+      - name: Build client
+        env:
+          VITE_API_URL:    ${{ secrets.VITE_API_URL }}
+          VITE_SOCKET_URL: ${{ secrets.VITE_SOCKET_URL }}
+          VITE_APP_NAME:   CamWatch
+        run: cd client && npm run build
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-dist
+          path: client/dist/
+          retention-days: 1
+
+  # ── 2. Deploy backend → Render ───────────────────────────────────────────────
+  deploy-backend:
+    name: Deploy Backend (Render)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render deploy hook
+        run: |
+          curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" \
+            --fail \
+            --silent \
+            --show-error
+      - name: Confirm
+        run: echo "✅ Render deploy triggered"
+
+  # ── 3. Deploy frontend → Vercel ──────────────────────────────────────────────
+  deploy-frontend:
+    name: Deploy Frontend (Vercel)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download dist
+        uses: actions/download-artifact@v4
+        with:
+          name: client-dist
+          path: client/dist/
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
+
+      - name: Deploy to Vercel (production)
+        env:
+          VERCEL_TOKEN:      ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID:     ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          vercel deploy client/dist \
+            --token=$VERCEL_TOKEN \
+            --prod \
+            --yes
