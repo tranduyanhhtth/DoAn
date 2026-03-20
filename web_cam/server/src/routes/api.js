@@ -11,24 +11,15 @@ const { getLiveStreams } = require('../mediaServer');
 const router = express.Router();
 
 // ── GET /api/streams ─────────────────────────────────────────────────────────
-// Returns all configured cameras + their live status + HLS URL
 router.get('/streams', (req, res) => {
-  const live = getLiveStreams();
-
-  const streams = config.CAMERAS.map(cam => {
-    const isLive = cam.streamKey in live;
-    return {
-      id:          cam.id,
-      label:       cam.label,
-      streamKey:   cam.streamKey,
-      live:        isLive,
-      startedAt:   isLive ? live[cam.streamKey].startedAt : null,
-      viewers:     isLive ? live[cam.streamKey].clientCount : 0,
-      // HLS playlist URL – served by Express /hls/* route
-      hlsUrl: `${req.protocol}://${req.get('host')}/hls/live/${cam.streamKey}/index.m3u8`,
-    };
-  });
-
+  const streams = config.CAMERAS.map(cam => ({
+    id:       cam.id,
+    label:    cam.label,
+    streamKey: cam.streamKey,
+    // HLS URL trỏ thẳng đến Cloudflare Tunnel trên camera box
+    hlsUrl: `${config.HLS_BASE_URL}/${cam.streamKey}/index.m3u8`,
+    live:    true,  // MediaMTX luôn sẵn sàng khi camera chạy
+  }));
   res.json({ ok: true, streams });
 });
 
