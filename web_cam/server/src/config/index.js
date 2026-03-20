@@ -9,6 +9,8 @@ module.exports = {
   // ── RTMP Ingest ───────────────────────────────────────────────
   // Camera box pushes RTMP to this server on port 1935
   RTMP_PORT: parseInt(process.env.RTMP_PORT) || 1935,
+  RTSP_PORT: parseInt(process.env.RTSP_PORT) || 8554,
+  MEDIAMTX_PATH: process.env.MEDIAMTX_PATH || '/usr/local/bin/mediamtx',
 
   // ── HLS Output ────────────────────────────────────────────────
   // node-media-server writes HLS segments here; Express serves them
