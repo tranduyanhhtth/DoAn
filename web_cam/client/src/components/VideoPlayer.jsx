@@ -75,7 +75,7 @@ export default function VideoPlayer({ hlsUrl, live }) {
     });
 
     hlsRef.current = hls;
-  }, [streamKey, live, destroyHls]);
+  }, [hlsUrl, live, destroyHls]);
 
   const scheduleReconnect = useCallback(() => {
     setStatus('loading');
