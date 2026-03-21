@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express    = require('express');
+const https      = require('https');
 const http       = require('http');
 const cors       = require('cors');
 const helmet     = require('helmet');
@@ -28,19 +29,35 @@ app.use(cors({ origin: config.ALLOWED_ORIGINS, credentials: true }));
 app.use(morgan('dev', { stream: { write: (m) => logger.http(m.trim()) } }));
 app.use(express.json());
 
+function probeHls(url) {
+  return new Promise((resolve) => {
+    const mod = url.startsWith('https') ? https : http;
+    const req = mod.request(url, { method: 'HEAD', timeout: 3000 }, (res) => {
+      resolve(res.statusCode === 200);
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+    req.end();
+  });
+}
+
+
 // ── API Routes ────────────────────────────────────────────────────────────────
 
 // GET /api/streams — danh sách camera + HLS URL
-app.get('/api/streams', (req, res) => {
+app.get('/api/streams', async (req, res) => {
   const hlsBase = config.HLS_BASE_URL;
 
-  const streams = config.CAMERAS.map(cam => ({
-    id:        cam.id,
-    label:     cam.label,
-    streamKey: cam.streamKey,
-    live:      true,
-    // Luôn trả hlsUrl — hls.js tự xử lý 404 nếu cam offline
-    hlsUrl: `${hlsBase}/${cam.streamKey}/index.m3u8`,
+  const streams = await Promise.all(config.CAMERAS.map(async (cam) => {
+    const hlsUrl = `${hlsBase}/${cam.streamKey}/index.m3u8`;
+    const isLive = await probeHls(hlsUrl);
+    return {
+      id:        cam.id,
+      label:     cam.label,
+      streamKey: cam.streamKey,
+      live:      isLive,
+      hlsUrl:    isLive ? hlsUrl : null,
+    };
   }));
 
   res.json({ ok: true, streams });

@@ -30,7 +30,7 @@ export default function VideoPlayer({ hlsUrl, live }) {
   }, []);
 
   const initPlayer = useCallback(() => {
-    if (!videoRef.current || !live) { setStatus('offline'); return; }
+    if (!videoRef.current || !live || !hlsUrl) { setStatus('offline'); return; }
     const url = hlsUrl;
     setStatus('loading');
 
