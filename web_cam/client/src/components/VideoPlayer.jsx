@@ -44,13 +44,29 @@ export default function VideoPlayer({ hlsUrl, live }) {
     destroyHls();
 
     const hls = new Hls({
-      liveSyncDurationCount:       3,    // giữ 3 segments buffer
-      liveMaxLatencyDurationCount: 6,    // tối đa 6s lag trước khi skip
-      maxBufferLength:             8,    // 8s buffer
-      maxLiveSyncPlaybackRate:     1.5,  // tự tăng speed để bắt kịp live
-      lowLatencyMode:              true, // bật LL-HLS
-      enableWorker:                true,
-      progressive:                 true,
+      // Tăng buffer để tránh rebuffer khi network không đều
+      maxBufferLength:             30,
+      maxMaxBufferLength:          60,
+      maxBufferSize:               60 * 1000 * 1000,  // 60MB
+
+      // Live sync — không cần quá thấp vì camera không cần ultra-low latency
+      liveSyncDurationCount:       4,
+      liveMaxLatencyDurationCount: 10,
+      maxLiveSyncPlaybackRate:     1.1,  // tăng nhẹ để bắt kịp
+
+      // Tắt lowLatencyMode vì dùng fmp4 không phải LL-HLS
+      lowLatencyMode:  false,
+
+      // Retry mạnh hơn khi network yếu
+      manifestLoadingMaxRetry:  8,
+      manifestLoadingRetryDelay: 1000,
+      levelLoadingMaxRetry:     8,
+      fragLoadingMaxRetry:      8,
+
+      enableWorker: true,
+      testBandwidth: true,
+      abrEwmaFastLive: 3,
+      abrEwmaSlowLive: 9,
     });
 
     hls.loadSource(url);

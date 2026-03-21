@@ -31,30 +31,30 @@ app.use(express.json());
 // ── API Routes ────────────────────────────────────────────────────────────────
 
 // GET /api/streams — danh sách camera + HLS URL
-app.get('/api/streams', (req, res) => {
+app.get('/api/streams', async (req, res) => {
   const hlsBase = config.HLS_BASE_URL;
-  const streams = config.CAMERAS.map(cam => ({
-    id:        cam.id,
-    label:     cam.label,
-    streamKey: cam.streamKey,
-    live:      true,
-    hlsUrl:    `${hlsBase}/${cam.streamKey}/index.m3u8`,
-  }));
-  res.json({ ok: true, streams });
-});
 
-// GET /api/streams/:key
-app.get('/api/streams/:key', (req, res) => {
-  const cam = config.CAMERAS.find(c => c.streamKey === req.params.key);
-  if (!cam) return res.status(404).json({ ok: false, error: 'Not found' });
-  res.json({
-    ok: true,
-    stream: {
-      ...cam,
-      live:   true,
-      hlsUrl: `${config.HLS_BASE_URL}/${cam.streamKey}/index.m3u8`,
-    },
-  });
+  const streams = await Promise.all(config.CAMERAS.map(async (cam) => {
+    // Probe m3u8 để biết cam có đang live không
+    const m3u8Url = `${hlsBase}/${cam.streamKey}/index.m3u8`;
+    let isLive = false;
+    try {
+      const resp = await fetch(m3u8Url, { method: 'HEAD', signal: AbortSignal.timeout(2000) });
+      isLive = resp.ok;
+    } catch (_) {
+      isLive = false;
+    }
+
+    return {
+      id:        cam.id,
+      label:     cam.label,
+      streamKey: cam.streamKey,
+      live:      isLive,
+      hlsUrl:    isLive ? m3u8Url : null,
+    };
+  }));
+
+  res.json({ ok: true, streams });
 });
 
 // GET /api/health
