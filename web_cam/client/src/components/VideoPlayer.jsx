@@ -49,13 +49,13 @@ export default function VideoPlayer({ streamKey, live }) {
     destroyHls();
 
     const hls = new Hls({
-      liveSyncDurationCount:       2,
-      liveMaxLatencyDurationCount: 5,
-      maxBufferLength:             10,
+      liveSyncDurationCount:       3,    // giữ 3 segments buffer
+      liveMaxLatencyDurationCount: 6,    // tối đa 6s lag trước khi skip
+      maxBufferLength:             8,    // 8s buffer
+      maxLiveSyncPlaybackRate:     1.5,  // tự tăng speed để bắt kịp live
+      lowLatencyMode:              true, // bật LL-HLS
       enableWorker:                true,
-      manifestLoadingMaxRetry:     6,
-      levelLoadingMaxRetry:        6,
-      fragLoadingMaxRetry:         6,
+      progressive:                 true,
     });
 
     hls.loadSource(url);
