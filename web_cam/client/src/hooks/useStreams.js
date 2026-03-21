@@ -29,20 +29,24 @@ export function useStreams() {
   }, []);
 
   // Keep live status updated from socket events
-  const { connected, liveKeys } = useSocket({
-    onStreamLive: ({ key }) => {
-      setCameras(prev =>
-        prev.map(c => c.streamKey === key ? { ...c, live: true } : c)
-      );
+  const { connected } = useSocket({
+    onStreamLive: () => {
+      fetchCameras();
     },
     onStreamEnded: ({ key }) => {
       setCameras(prev =>
-        prev.map(c => c.streamKey === key ? { ...c, live: false, viewers: 0 } : c)
+        prev.map(c => c.streamKey === key
+          ? { ...c, live: false, hlsUrl: null, viewers: 0 }
+          : c
+        )
       );
     },
     onViewers: ({ key, count }) => {
       setCameras(prev =>
-        prev.map(c => c.streamKey === key ? { ...c, viewers: count } : c)
+        prev.map(c => c.streamKey === key
+          ? { ...c, viewers: count }
+          : c
+        )
       );
     },
   });
@@ -53,17 +57,6 @@ export function useStreams() {
     const id = setInterval(fetchCameras, 30_000);
     return () => clearInterval(id);
   }, [fetchCameras]);
-
-  // Merge real-time liveKeys into cameras array whenever socket updates arrive
-  useEffect(() => {
-    setCameras(prev =>
-      prev.map(c => ({
-        ...c,
-        live:    c.streamKey in liveKeys,
-        viewers: liveKeys[c.streamKey]?.clientCount ?? c.viewers,
-      }))
-    );
-  }, [liveKeys]);
 
   return { cameras, loading, error, serverOk, socketConnected: connected, refetch: fetchCameras };
 }
