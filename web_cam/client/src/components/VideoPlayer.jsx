@@ -80,7 +80,12 @@ export default function VideoPlayer({ hlsUrl, live }) {
 
     hls.on(Hls.Events.ERROR, (_e, data) => {
       if (!data.fatal) return;
+
       if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+        if (data.response?.code === 404) {
+          scheduleReconnect();
+          return;
+        }
         retryRef.current < FATAL_RETRY_LIMIT
           ? (retryRef.current++, setStatus('loading'), hls.startLoad())
           : scheduleReconnect();
