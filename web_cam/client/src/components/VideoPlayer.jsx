@@ -3,11 +3,6 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import Hls from 'hls.js';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
-
-function hlsUrl(streamKey) {
-  return `${API_BASE}/hls/live/${streamKey}/index.m3u8`;
-}
-
 const RECONNECT_DELAY_MS = 5000;
 const FATAL_RETRY_LIMIT  = 6;
 
@@ -20,7 +15,7 @@ const CamIcon = () => (
   </div>
 );
 
-export default function VideoPlayer({ streamKey, live }) {
+export default function VideoPlayer({ hlsUrl, live }) {
   const videoRef  = useRef(null);
   const hlsRef    = useRef(null);
   const retryRef  = useRef(0);
@@ -36,7 +31,7 @@ export default function VideoPlayer({ streamKey, live }) {
 
   const initPlayer = useCallback(() => {
     if (!videoRef.current || !live) { setStatus('offline'); return; }
-    const url = hlsUrl(streamKey);
+    const url = hlsUrl;
     setStatus('loading');
 
     if (!Hls.isSupported()) {

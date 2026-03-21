@@ -47,7 +47,7 @@ export default function CameraCard({ camera, expanded, onToggleExpand }) {
 
       {/* ── Video ── */}
       <div className="cam-card__video">
-        <VideoPlayer streamKey={streamKey} live={live} label={label} />
+        <VideoPlayer hlsUrl={camera.hlsUrl} live={live} />
       </div>
 
       {/* ── Footer ── */}
