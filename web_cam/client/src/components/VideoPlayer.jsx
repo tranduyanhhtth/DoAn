@@ -1,38 +1,37 @@
 // src/components/VideoPlayer.jsx
-// ─────────────────────────────────────────────────────────────────────────────
-//  Self-contained HLS video player.
-//  • Uses hls.js when browser doesn't support native HLS (Chrome, Firefox).
-//  • Falls back to native <video src> for Safari.
-//  • Handles auto-reconnect when stream drops.
-// ─────────────────────────────────────────────────────────────────────────────
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Hls from 'hls.js';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
-// Build the full HLS URL for a stream key
 function hlsUrl(streamKey) {
   return `${API_BASE}/hls/live/${streamKey}/index.m3u8`;
 }
 
-const RECONNECT_DELAY_MS  = 5_000;
-const FATAL_RETRY_LIMIT   = 6;
+const RECONNECT_DELAY_MS = 5000;
+const FATAL_RETRY_LIMIT  = 6;
 
-export default function VideoPlayer({ streamKey, live, label }) {
-  const videoRef    = useRef(null);
-  const hlsRef      = useRef(null);
-  const retryRef    = useRef(0);
-  const timerRef    = useRef(null);
+const CamIcon = () => (
+  <div className="cam-icon-wrap">
+    <svg viewBox="0 0 24 24">
+      <path d="M15 10l4.553-2.069A1 1 0 0121 8.87v6.26a1 1 0 01-1.447.894L15 14"/>
+      <rect x="3" y="6" width="12" height="12" rx="2"/>
+    </svg>
+  </div>
+);
 
-  const [status, setStatus]   = useState('idle');   // idle | loading | playing | error | offline
+export default function VideoPlayer({ streamKey, live }) {
+  const videoRef  = useRef(null);
+  const hlsRef    = useRef(null);
+  const retryRef  = useRef(0);
+  const timerRef  = useRef(null);
+
+  const [status,   setStatus]   = useState('idle');
   const [showCtrl, setShowCtrl] = useState(false);
 
   const destroyHls = useCallback(() => {
     clearTimeout(timerRef.current);
-    if (hlsRef.current) {
-      hlsRef.current.destroy();
-      hlsRef.current = null;
-    }
+    if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
   }, []);
 
   const initPlayer = useCallback(() => {
@@ -40,7 +39,6 @@ export default function VideoPlayer({ streamKey, live, label }) {
     const url = hlsUrl(streamKey);
     setStatus('loading');
 
-    // ── Safari: native HLS support ──────────────────────────────────────────
     if (!Hls.isSupported()) {
       videoRef.current.src = url;
       videoRef.current.play().catch(() => {});
@@ -48,18 +46,13 @@ export default function VideoPlayer({ streamKey, live, label }) {
       return;
     }
 
-    // ── hls.js ──────────────────────────────────────────────────────────────
     destroyHls();
 
     const hls = new Hls({
-      // Low-latency tuning
-      liveSyncDurationCount:      2,
+      liveSyncDurationCount:       2,
       liveMaxLatencyDurationCount: 5,
       maxBufferLength:             10,
-      maxMaxBufferLength:          30,
       enableWorker:                true,
-      startFragPrefetch:           true,
-      // Retry on network errors
       manifestLoadingMaxRetry:     6,
       levelLoadingMaxRetry:        6,
       fragLoadingMaxRetry:         6,
@@ -74,19 +67,13 @@ export default function VideoPlayer({ streamKey, live, label }) {
       setStatus('playing');
     });
 
-    hls.on(Hls.Events.ERROR, (_event, data) => {
+    hls.on(Hls.Events.ERROR, (_e, data) => {
       if (!data.fatal) return;
-
       if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-        if (retryRef.current < FATAL_RETRY_LIMIT) {
-          retryRef.current++;
-          setStatus('loading');
-          hls.startLoad();   // soft recover
-        } else {
-          scheduleReconnect();
-        }
+        retryRef.current < FATAL_RETRY_LIMIT
+          ? (retryRef.current++, setStatus('loading'), hls.startLoad())
+          : scheduleReconnect();
       } else {
-        // Fatal media error → hard recover
         setStatus('error');
         hls.recoverMediaError();
       }
@@ -102,46 +89,39 @@ export default function VideoPlayer({ streamKey, live, label }) {
     timerRef.current = setTimeout(initPlayer, RECONNECT_DELAY_MS);
   }, [initPlayer, destroyHls]);
 
-  // Re-init player whenever live status or streamKey changes
-  useEffect(() => {
-    initPlayer();
-    return destroyHls;
-  }, [initPlayer, destroyHls]);
+  useEffect(() => { initPlayer(); return destroyHls; }, [initPlayer, destroyHls]);
 
-  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div
       className="player-wrap"
       onMouseEnter={() => setShowCtrl(true)}
       onMouseLeave={() => setShowCtrl(false)}
     >
-      {/* Overlay states */}
       {status === 'offline' && (
         <div className="player-overlay">
-          <span className="overlay-icon">📷</span>
+          <CamIcon />
           <span>Không có tín hiệu</span>
         </div>
       )}
       {status === 'loading' && (
         <div className="player-overlay">
-          <span className="spinner" />
+          <div className="spinner" />
           <span>Đang kết nối...</span>
         </div>
       )}
       {status === 'error' && (
         <div className="player-overlay">
-          <span className="overlay-icon">⚠️</span>
+          <CamIcon />
           <span>Lỗi stream — thử lại...</span>
         </div>
       )}
-
       <video
         ref={videoRef}
         muted
         autoPlay
         playsInline
         controls={showCtrl && status === 'playing'}
-        style={{ width: '100%', display: 'block', background: '#000', aspectRatio: '16/9' }}
+        style={{ width: '100%', display: 'block', background: '#0f0f0e', aspectRatio: '16/9' }}
       />
     </div>
   );
