@@ -55,20 +55,25 @@ export default function VideoPlayer({ hlsUrl, live }) {
     }
 
     const hls = new Hls({
-      maxBufferLength:             30,
-      maxMaxBufferLength:          60,
-      maxBufferSize:               60 * 1000 * 1000,
-      liveSyncDurationCount:       4,
-      liveMaxLatencyDurationCount: 10,
-      maxLiveSyncPlaybackRate:     1.1,
-      lowLatencyMode:              false,
-      manifestLoadingMaxRetry:     8,
-      manifestLoadingRetryDelay:   1000,
-      levelLoadingMaxRetry:        8,
-      fragLoadingMaxRetry:         8,
-      enableWorker:                true,
-      abrEwmaFastLive:             3,
-      abrEwmaSlowLive:             9,
+      // Giảm mạnh buffer để giảm latency
+      maxBufferLength:             8,    // từ 30 xuống 8
+      maxMaxBufferLength:          15,   // từ 60 xuống 15
+      maxBufferSize:               10 * 1000 * 1000,  // 10MB
+
+      // Sync chặt hơn với live edge
+      liveSyncDurationCount:       2,    // từ 4 xuống 2
+      liveMaxLatencyDurationCount: 4,    // từ 10 xuống 4
+      maxLiveSyncPlaybackRate:     1.3,  // tăng tốc nhanh hơn để bắt kịp
+
+      lowLatencyMode:  false,
+      enableWorker:    true,
+
+      // Retry nhẹ hơn — không cần retry mạnh cho live
+      manifestLoadingMaxRetry:   3,
+      levelLoadingMaxRetry:      3,
+      fragLoadingMaxRetry:       3,
+      abrEwmaFastLive:           3,
+      abrEwmaSlowLive:           9,
     });
 
     hls.loadSource(hlsUrl);
