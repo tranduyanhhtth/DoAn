@@ -2,7 +2,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Hls from 'hls.js';
 
-const API_BASE = import.meta.env.VITE_API_URL || '';
 const RECONNECT_DELAY_MS = 5000;
 const FATAL_RETRY_LIMIT  = 6;
 
@@ -16,10 +15,10 @@ const CamIcon = () => (
 );
 
 export default function VideoPlayer({ hlsUrl, live }) {
-  const videoRef  = useRef(null);
-  const hlsRef    = useRef(null);
-  const retryRef  = useRef(0);
-  const timerRef  = useRef(null);
+  const videoRef = useRef(null);
+  const hlsRef   = useRef(null);
+  const retryRef = useRef(0);
+  const timerRef = useRef(null);
 
   const [status,   setStatus]   = useState('idle');
   const [showCtrl, setShowCtrl] = useState(false);
@@ -29,47 +28,50 @@ export default function VideoPlayer({ hlsUrl, live }) {
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
   }, []);
 
-  const initPlayer = useCallback(() => {
-    if (!videoRef.current || !live || !hlsUrl) { setStatus('offline'); return; }
-    const url = hlsUrl;
+  // Dùng ref để tránh circular dep giữa initPlayer ↔ scheduleReconnect
+  const initPlayerRef = useRef(null);
+
+  const scheduleReconnect = useCallback(() => {
     setStatus('loading');
+    destroyHls();
+    retryRef.current = 0;
+    timerRef.current = setTimeout(() => initPlayerRef.current?.(), RECONNECT_DELAY_MS);
+  }, [destroyHls]);
+
+  const initPlayer = useCallback(() => {
+    if (!videoRef.current || !live || !hlsUrl) {
+      setStatus('offline');
+      return;
+    }
+
+    setStatus('loading');
+    destroyHls();
 
     if (!Hls.isSupported()) {
-      videoRef.current.src = url;
+      videoRef.current.src = hlsUrl;
       videoRef.current.play().catch(() => {});
       setStatus('playing');
       return;
     }
 
-    destroyHls();
-
     const hls = new Hls({
-      // Tăng buffer để tránh rebuffer khi network không đều
       maxBufferLength:             30,
       maxMaxBufferLength:          60,
-      maxBufferSize:               60 * 1000 * 1000,  // 60MB
-
-      // Live sync — không cần quá thấp vì camera không cần ultra-low latency
+      maxBufferSize:               60 * 1000 * 1000,
       liveSyncDurationCount:       4,
       liveMaxLatencyDurationCount: 10,
-      maxLiveSyncPlaybackRate:     1.1,  // tăng nhẹ để bắt kịp
-
-      // Tắt lowLatencyMode vì dùng fmp4 không phải LL-HLS
-      lowLatencyMode:  false,
-
-      // Retry mạnh hơn khi network yếu
-      manifestLoadingMaxRetry:  8,
-      manifestLoadingRetryDelay: 1000,
-      levelLoadingMaxRetry:     8,
-      fragLoadingMaxRetry:      8,
-
-      enableWorker: true,
-      testBandwidth: true,
-      abrEwmaFastLive: 3,
-      abrEwmaSlowLive: 9,
+      maxLiveSyncPlaybackRate:     1.1,
+      lowLatencyMode:              false,
+      manifestLoadingMaxRetry:     8,
+      manifestLoadingRetryDelay:   1000,
+      levelLoadingMaxRetry:        8,
+      fragLoadingMaxRetry:         8,
+      enableWorker:                true,
+      abrEwmaFastLive:             3,
+      abrEwmaSlowLive:             9,
     });
 
-    hls.loadSource(url);
+    hls.loadSource(hlsUrl);
     hls.attachMedia(videoRef.current);
 
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -80,7 +82,6 @@ export default function VideoPlayer({ hlsUrl, live }) {
 
     hls.on(Hls.Events.ERROR, (_e, data) => {
       if (!data.fatal) return;
-
       if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
         if (data.response?.code === 404) {
           scheduleReconnect();
@@ -96,16 +97,15 @@ export default function VideoPlayer({ hlsUrl, live }) {
     });
 
     hlsRef.current = hls;
-  }, [hlsUrl, live, destroyHls]);
+  }, [hlsUrl, live, destroyHls, scheduleReconnect]);
 
-  const scheduleReconnect = useCallback(() => {
-    setStatus('loading');
-    destroyHls();
-    retryRef.current = 0;
-    timerRef.current = setTimeout(initPlayer, RECONNECT_DELAY_MS);
+  // Đồng bộ ref với function mới nhất
+  useEffect(() => { initPlayerRef.current = initPlayer; }, [initPlayer]);
+
+  useEffect(() => {
+    initPlayer();
+    return destroyHls;
   }, [initPlayer, destroyHls]);
-
-  useEffect(() => { initPlayer(); return destroyHls; }, [initPlayer, destroyHls]);
 
   return (
     <div

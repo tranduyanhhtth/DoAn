@@ -5,60 +5,88 @@ import { useSocket } from './useSocket';
 async function probeHls(url) {
   if (!url) return false;
   try {
-    const res = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(4000) });
-    return res.ok;
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { Range: 'bytes=0-100' },
+      signal: AbortSignal.timeout(5000),
+      cache: 'no-store',
+    });
+    return res.status === 200 || res.status === 206;
   } catch {
     return false;
   }
 }
 
-export function useStreams() {
-  const [cameras, setCameras]   = useState([]);
-  const [loading, setLoading]   = useState(true);
-  const [error, setError]       = useState(null);
-  const [serverOk, setServerOk] = useState(false);
-  const probeIntervalRef        = useRef(null);
+const POLL_LIVE_MS    = 15_000;
+const POLL_OFFLINE_MS = 30_000;
 
-  const fetchCameras = useCallback(async () => {
+export function useStreams() {
+  const [cameras,  setCameras]  = useState([]);
+  const [loading,  setLoading]  = useState(true);
+  const [error,    setError]    = useState(null);
+  const [serverOk, setServerOk] = useState(false);
+
+  const timerRef   = useRef(null);
+  const mountedRef = useRef(true);
+  // Ref giữ hàm fetch mới nhất — tránh stale closure trong setTimeout
+  const fetchRef   = useRef(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const fetchAndProbe = useCallback(async () => {
+    clearTimeout(timerRef.current);
     try {
       const streams = await api.getStreams();
 
-      // Client tự probe từng hlsUrl
-      const probed = await Promise.all(streams.map(async (cam) => {
-        const isLive = await probeHls(cam.hlsUrl);
-        return {
-          ...cam,
-          live:   isLive,
-          hlsUrl: isLive ? cam.hlsUrl : null,
-        };
-      }));
+      const probed = await Promise.all(
+        streams.map(async (cam) => {
+          const isLive = await probeHls(cam.hlsUrl);
+          return { ...cam, live: isLive, hlsUrl: isLive ? cam.hlsUrl : null };
+        })
+      );
 
+      if (!mountedRef.current) return;
       setCameras(probed);
       setServerOk(true);
       setError(null);
+
+      const hasLive = probed.some(c => c.live);
+      // Dùng ref thay vì gọi trực tiếp để tránh circular dep
+      timerRef.current = setTimeout(
+        () => fetchRef.current?.(),
+        hasLive ? POLL_LIVE_MS : POLL_OFFLINE_MS
+      );
     } catch {
+      if (!mountedRef.current) return;
       setError('Cannot reach server. Retrying...');
       setServerOk(false);
+      timerRef.current = setTimeout(() => fetchRef.current?.(), POLL_OFFLINE_MS);
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
-  }, []);
+  }, []); // deps rỗng — an toàn vì dùng ref
+
+  // Cập nhật ref mỗi khi hàm thay đổi
+  useEffect(() => { fetchRef.current = fetchAndProbe; }, [fetchAndProbe]);
 
   const { connected } = useSocket({
-    onStreamLive:  ()         => fetchCameras(),
-    onStreamEnded: ({ key })  => setCameras(prev =>
+    onStreamLive:  ()           => fetchRef.current?.(),
+    onStreamEnded: ({ key })    => setCameras(prev =>
       prev.map(c => c.streamKey === key
         ? { ...c, live: false, hlsUrl: null, viewers: 0 } : c)),
     onViewers: ({ key, count }) => setCameras(prev =>
       prev.map(c => c.streamKey === key ? { ...c, viewers: count } : c)),
   });
 
-  // Poll mỗi 15s (probe nhanh hơn để detect camera lên/xuống)
   useEffect(() => {
-    fetchCameras();
-    probeIntervalRef.current = setInterval(fetchCameras, 15_000);
-    return () => clearInterval(probeIntervalRef.current);
-  }, [fetchCameras]);
+    fetchAndProbe();
+  }, [fetchAndProbe]);
 
-  return { cameras, loading, error, serverOk, socketConnected: connected, refetch: fetchCameras };
+  return { cameras, loading, error, serverOk, socketConnected: connected, refetch: fetchAndProbe };
 }
