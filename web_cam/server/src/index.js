@@ -45,21 +45,15 @@ function probeHls(url) {
 // ── API Routes ────────────────────────────────────────────────────────────────
 
 // GET /api/streams — danh sách camera + HLS URL
-app.get('/api/streams', async (req, res) => {
+app.get('/api/streams', (req, res) => {
   const hlsBase = config.HLS_BASE_URL;
-
-  const streams = await Promise.all(config.CAMERAS.map(async (cam) => {
-    const hlsUrl = `${hlsBase}/${cam.streamKey}/index.m3u8`;
-    const isLive = await probeHls(hlsUrl);
-    return {
-      id:        cam.id,
-      label:     cam.label,
-      streamKey: cam.streamKey,
-      live:      isLive,
-      hlsUrl:    isLive ? hlsUrl : null,
-    };
+  const streams = config.CAMERAS.map(cam => ({
+    id:        cam.id,
+    label:     cam.label,
+    streamKey: cam.streamKey,
+    live:      true,                  
+    hlsUrl:    `${hlsBase}/${cam.streamKey}/index.m3u8`,
   }));
-
   res.json({ ok: true, streams });
 });
 

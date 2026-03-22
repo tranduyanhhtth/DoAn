@@ -1,26 +1,42 @@
-// src/hooks/useStreams.js
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../services/api';
 import { useSocket } from './useSocket';
 
-/**
- * Top-level data hook.
- * Fetches camera list from REST, then keeps live status in sync via Socket.IO.
- */
+async function probeHls(url) {
+  if (!url) return false;
+  try {
+    const res = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(4000) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 export function useStreams() {
   const [cameras, setCameras]   = useState([]);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState(null);
   const [serverOk, setServerOk] = useState(false);
+  const probeIntervalRef        = useRef(null);
 
-  // Fetch cameras from REST
   const fetchCameras = useCallback(async () => {
     try {
       const streams = await api.getStreams();
-      setCameras(streams);
+
+      // Client tự probe từng hlsUrl
+      const probed = await Promise.all(streams.map(async (cam) => {
+        const isLive = await probeHls(cam.hlsUrl);
+        return {
+          ...cam,
+          live:   isLive,
+          hlsUrl: isLive ? cam.hlsUrl : null,
+        };
+      }));
+
+      setCameras(probed);
       setServerOk(true);
       setError(null);
-    } catch (err) {
+    } catch {
       setError('Cannot reach server. Retrying...');
       setServerOk(false);
     } finally {
@@ -28,34 +44,20 @@ export function useStreams() {
     }
   }, []);
 
-  // Keep live status updated from socket events
   const { connected } = useSocket({
-    onStreamLive: () => {
-      fetchCameras();
-    },
-    onStreamEnded: ({ key }) => {
-      setCameras(prev =>
-        prev.map(c => c.streamKey === key
-          ? { ...c, live: false, hlsUrl: null, viewers: 0 }
-          : c
-        )
-      );
-    },
-    onViewers: ({ key, count }) => {
-      setCameras(prev =>
-        prev.map(c => c.streamKey === key
-          ? { ...c, viewers: count }
-          : c
-        )
-      );
-    },
+    onStreamLive:  ()         => fetchCameras(),
+    onStreamEnded: ({ key })  => setCameras(prev =>
+      prev.map(c => c.streamKey === key
+        ? { ...c, live: false, hlsUrl: null, viewers: 0 } : c)),
+    onViewers: ({ key, count }) => setCameras(prev =>
+      prev.map(c => c.streamKey === key ? { ...c, viewers: count } : c)),
   });
 
-  // Initial fetch + polling fallback every 30 s
+  // Poll mỗi 15s (probe nhanh hơn để detect camera lên/xuống)
   useEffect(() => {
     fetchCameras();
-    const id = setInterval(fetchCameras, 30_000);
-    return () => clearInterval(id);
+    probeIntervalRef.current = setInterval(fetchCameras, 15_000);
+    return () => clearInterval(probeIntervalRef.current);
   }, [fetchCameras]);
 
   return { cameras, loading, error, serverOk, socketConnected: connected, refetch: fetchCameras };

@@ -12,10 +12,11 @@ let _socket = null;
 function getSocket() {
   if (!_socket || _socket.disconnected) {
     _socket = io(SOCKET_URL, {
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'],
       reconnectionAttempts: Infinity,
-      reconnectionDelay: 2000,
-      reconnectionDelayMax: 10000,
+      reconnectionDelay: 3000,
+      reconnectionDelayMax: 15000,
+      timeout: 20000,
     });
   }
   return _socket;
