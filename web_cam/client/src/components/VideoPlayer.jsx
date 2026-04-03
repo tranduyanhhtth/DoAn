@@ -1,9 +1,21 @@
-// src/components/VideoPlayer.jsx
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Hls from 'hls.js';
 
+const WEBRTC_BASE = import.meta.env.VITE_WEBRTC_URL || '';
 const RECONNECT_DELAY_MS = 5000;
-const FATAL_RETRY_LIMIT  = 6;
+
+const ICE_SERVERS = [
+  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+  {
+    urls: [
+      'turn:openrelay.metered.ca:80',
+      'turn:openrelay.metered.ca:443',
+      'turns:openrelay.metered.ca:443',
+    ],
+    username:   'openrelayproject',
+    credential: 'openrelayproject',
+  },
+];
 
 const CamIcon = () => (
   <div className="cam-icon-wrap">
@@ -14,38 +26,123 @@ const CamIcon = () => (
   </div>
 );
 
-export default function VideoPlayer({ hlsUrl, live }) {
-  const videoRef = useRef(null);
-  const hlsRef   = useRef(null);
-  const retryRef = useRef(0);
-  const timerRef = useRef(null);
+export default function VideoPlayer({ hlsUrl, live, streamKey }) {
+  const videoRef  = useRef(null);
+  const pcRef     = useRef(null);   // RTCPeerConnection
+  const hlsRef    = useRef(null);   // hls.js fallback
+  const timerRef  = useRef(null);
+  const initRef   = useRef(null);
+  const modeRef   = useRef('webrtc'); // 'webrtc' | 'hls'
 
   const [status,   setStatus]   = useState('idle');
+  const [mode,     setMode]     = useState('webrtc');
   const [showCtrl, setShowCtrl] = useState(false);
 
-  const destroyHls = useCallback(() => {
+  // ── Cleanup ────────────────────────────────────────────────────────────────
+  const destroyAll = useCallback(() => {
     clearTimeout(timerRef.current);
-    if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
-  }, []);
 
-  // Dùng ref để tránh circular dep giữa initPlayer ↔ scheduleReconnect
-  const initPlayerRef = useRef(null);
-
-  const scheduleReconnect = useCallback(() => {
-    setStatus('loading');
-    destroyHls();
-    retryRef.current = 0;
-    timerRef.current = setTimeout(() => initPlayerRef.current?.(), RECONNECT_DELAY_MS);
-  }, [destroyHls]);
-
-  const initPlayer = useCallback(() => {
-    if (!videoRef.current || !live || !hlsUrl) {
-      setStatus('offline');
-      return;
+    if (pcRef.current) {
+      pcRef.current.ontrack       = null;
+      pcRef.current.onicecandidate = null;
+      pcRef.current.onconnectionstatechange = null;
+      pcRef.current.close();
+      pcRef.current = null;
     }
 
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+      videoRef.current.src       = '';
+    }
+  }, []);
+
+  // ── WebRTC via WHEP ────────────────────────────────────────────────────────
+  const initWebRTC = useCallback(async () => {
+    if (!videoRef.current || !live || !streamKey) return;
+
+    const whepUrl = `${WEBRTC_BASE}/${streamKey}/whep`;
     setStatus('loading');
-    destroyHls();
+    setMode('webrtc');
+    modeRef.current = 'webrtc';
+
+    try {
+      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      pcRef.current = pc;
+
+      pc.addTransceiver('video', { direction: 'recvonly' });
+      pc.addTransceiver('audio', { direction: 'recvonly' });
+
+      // Nhận video track
+      pc.ontrack = (e) => {
+        if (videoRef.current && e.streams[0]) {
+          videoRef.current.srcObject = e.streams[0];
+          videoRef.current.play().catch(() => {});
+          setStatus('playing');
+        }
+      };
+
+      // Monitor connection state
+      pc.onconnectionstatechange = () => {
+        const state = pc.connectionState;
+        if (state === 'failed' || state === 'disconnected') {
+          setStatus('loading');
+          destroyAll();
+          timerRef.current = setTimeout(() => initRef.current?.(), RECONNECT_DELAY_MS);
+        }
+        if (state === 'closed') {
+          setStatus('offline');
+        }
+      };
+
+      // Tạo offer
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      // Đợi ICE gathering xong (tối đa 3 giây)
+      await new Promise((resolve) => {
+        if (pc.iceGatheringState === 'complete') { resolve(); return; }
+        const timeout = setTimeout(resolve, 3000);
+        pc.onicegatheringstatechange = () => {
+          if (pc.iceGatheringState === 'complete') {
+            clearTimeout(timeout);
+            resolve();
+          }
+        };
+      });
+
+      // Gửi offer lên WHEP endpoint
+      const resp = await fetch(whepUrl, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/sdp' },
+        body:    pc.localDescription.sdp,
+        signal:  AbortSignal.timeout(8000),
+      });
+
+      if (!resp.ok) {
+        throw new Error(`WHEP ${resp.status}`);
+      }
+
+      const answerSdp = await resp.text();
+      await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+
+    } catch (err) {
+      console.warn('[WebRTC] failed:', err.message);
+      destroyAll();
+      setStatus('offline');
+    }
+  }, [streamKey, live, destroyAll]);
+
+  // ── HLS fallback (chỉ dùng nếu WEBRTC_BASE chưa cấu hình) ─────────────────
+  const initHls = useCallback(() => {
+    if (!videoRef.current || !live || !hlsUrl) { setStatus('offline'); return; }
+    setStatus('loading');
+    setMode('hls');
+    modeRef.current = 'hls';
 
     if (!Hls.isSupported()) {
       videoRef.current.src = hlsUrl;
@@ -55,62 +152,52 @@ export default function VideoPlayer({ hlsUrl, live }) {
     }
 
     const hls = new Hls({
-      // Giảm mạnh buffer để giảm latency
-      maxBufferLength:             8,    // từ 30 xuống 8
-      maxMaxBufferLength:          15,   // từ 60 xuống 15
-      maxBufferSize:               10 * 1000 * 1000,  // 10MB
-
-      // Sync chặt hơn với live edge
-      liveSyncDurationCount:       2,    // từ 4 xuống 2
-      liveMaxLatencyDurationCount: 4,    // từ 10 xuống 4
-      maxLiveSyncPlaybackRate:     1.3,  // tăng tốc nhanh hơn để bắt kịp
-
-      lowLatencyMode:  false,
-      enableWorker:    true,
-
-      // Retry nhẹ hơn — không cần retry mạnh cho live
-      manifestLoadingMaxRetry:   3,
-      levelLoadingMaxRetry:      3,
-      fragLoadingMaxRetry:       3,
-      abrEwmaFastLive:           3,
-      abrEwmaSlowLive:           9,
+      maxBufferLength:             8,
+      maxMaxBufferLength:          15,
+      liveSyncDurationCount:       2,
+      liveMaxLatencyDurationCount: 4,
+      maxLiveSyncPlaybackRate:     1.3,
+      lowLatencyMode:              false,
+      manifestLoadingMaxRetry:     3,
+      fragLoadingMaxRetry:         3,
+      enableWorker:                true,
     });
 
     hls.loadSource(hlsUrl);
     hls.attachMedia(videoRef.current);
 
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      retryRef.current = 0;
       videoRef.current?.play().catch(() => {});
       setStatus('playing');
     });
 
     hls.on(Hls.Events.ERROR, (_e, data) => {
       if (!data.fatal) return;
-      if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-        if (data.response?.code === 404) {
-          scheduleReconnect();
-          return;
-        }
-        retryRef.current < FATAL_RETRY_LIMIT
-          ? (retryRef.current++, setStatus('loading'), hls.startLoad())
-          : scheduleReconnect();
-      } else {
-        setStatus('error');
-        hls.recoverMediaError();
-      }
+      destroyAll();
+      timerRef.current = setTimeout(() => initRef.current?.(), RECONNECT_DELAY_MS);
     });
 
     hlsRef.current = hls;
-  }, [hlsUrl, live, destroyHls, scheduleReconnect]);
+  }, [hlsUrl, live, destroyAll]);
 
-  // Đồng bộ ref với function mới nhất
-  useEffect(() => { initPlayerRef.current = initPlayer; }, [initPlayer]);
+  // ── Entry point ────────────────────────────────────────────────────────────
+  const init = useCallback(() => {
+    if (!live) { setStatus('offline'); return; }
+    destroyAll();
+    // Dùng WebRTC nếu có WEBRTC_BASE, không thì dùng HLS
+    if (WEBRTC_BASE && streamKey) {
+      initWebRTC();
+    } else {
+      initHls();
+    }
+  }, [live, streamKey, destroyAll, initWebRTC, initHls]);
+
+  useEffect(() => { initRef.current = init; }, [init]);
 
   useEffect(() => {
-    initPlayer();
-    return destroyHls;
-  }, [initPlayer, destroyHls]);
+    init();
+    return destroyAll;
+  }, [init, destroyAll]);
 
   return (
     <div
@@ -127,13 +214,7 @@ export default function VideoPlayer({ hlsUrl, live }) {
       {status === 'loading' && (
         <div className="player-overlay">
           <div className="spinner" />
-          <span>Đang kết nối...</span>
-        </div>
-      )}
-      {status === 'error' && (
-        <div className="player-overlay">
-          <CamIcon />
-          <span>Lỗi stream — thử lại...</span>
+          <span>{mode === 'webrtc' ? 'Đang kết nối WebRTC...' : 'Đang kết nối...'}</span>
         </div>
       )}
       <video

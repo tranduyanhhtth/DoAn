@@ -1,22 +1,21 @@
+// web_cam/server/src/config/index.js
 require('dotenv').config();
 
 module.exports = {
-  PORT:         parseInt(process.env.PORT) || 3001,
-  NODE_ENV:     process.env.NODE_ENV || 'development',
+  PORT:           parseInt(process.env.PORT) || 3001,
+  NODE_ENV:       process.env.NODE_ENV || 'development',
 
-  // URL Cloudflare Tunnel trên camera box
-  // Ví dụ: https://stream.tranduyanh20225256.id.vn
-  //    hoặc: https://abc-xyz.trycloudflare.com
-  HLS_BASE_URL: process.env.HLS_BASE_URL || 'http://localhost:8888',
-
-  ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || 'admin',
+  // URL public của server này (dùng để build hlsUrl)
+  HLS_PUBLIC_URL: process.env.HLS_PUBLIC_URL || 'http://localhost:3001',
 
   ALLOWED_ORIGINS: (process.env.ALLOWED_ORIGINS || 'http://localhost:5173').split(' '),
+  ADMIN_PASSWORD:  process.env.ADMIN_PASSWORD || 'admin',
 
+  // Mỗi camera có UDP port riêng — firmware biết port này
   CAMERAS: [
-    { id: 'cam0', label: 'Camera Chính',  streamKey: 'cam0' },
-    { id: 'cam1', label: 'Camera Phụ 1',  streamKey: 'cam1' },
-    { id: 'cam2', label: 'Camera Phụ 2',  streamKey: 'cam2' },
-    { id: 'cam3', label: 'Camera Phụ 3',  streamKey: 'cam3' },
+    { id: 'cam0', label: 'Camera Chính',  streamKey: 'cam0', udpPort: 5001 },
+    { id: 'cam1', label: 'Camera Phụ 1',  streamKey: 'cam1', udpPort: 5002 },
+    { id: 'cam2', label: 'Camera Phụ 2',  streamKey: 'cam2', udpPort: 5003 },
+    { id: 'cam3', label: 'Camera Phụ 3',  streamKey: 'cam3', udpPort: 5004 },
   ],
 };

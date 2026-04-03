@@ -2,24 +2,6 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../services/api';
 import { useSocket } from './useSocket';
 
-async function probeHls(url) {
-  if (!url) return false;
-  try {
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: { Range: 'bytes=0-100' },
-      signal: AbortSignal.timeout(5000),
-      cache: 'no-store',
-    });
-    return res.status === 200 || res.status === 206;
-  } catch {
-    return false;
-  }
-}
-
-const POLL_LIVE_MS    = 15_000;
-const POLL_OFFLINE_MS = 30_000;
-
 export function useStreams() {
   const [cameras,  setCameras]  = useState([]);
   const [loading,  setLoading]  = useState(true);
@@ -40,37 +22,25 @@ export function useStreams() {
   }, []);
 
   const fetchAndProbe = useCallback(async () => {
-    clearTimeout(timerRef.current);
-    try {
-      const streams = await api.getStreams();
-
-      const probed = await Promise.all(
-        streams.map(async (cam) => {
-          const isLive = await probeHls(cam.hlsUrl);
-          return { ...cam, live: isLive, hlsUrl: isLive ? cam.hlsUrl : null };
-        })
-      );
-
-      if (!mountedRef.current) return;
-      setCameras(probed);
-      setServerOk(true);
-      setError(null);
-
-      const hasLive = probed.some(c => c.live);
-      // Dùng ref thay vì gọi trực tiếp để tránh circular dep
-      timerRef.current = setTimeout(
-        () => fetchRef.current?.(),
-        hasLive ? POLL_LIVE_MS : POLL_OFFLINE_MS
-      );
-    } catch {
-      if (!mountedRef.current) return;
-      setError('Cannot reach server. Retrying...');
-      setServerOk(false);
-      timerRef.current = setTimeout(() => fetchRef.current?.(), POLL_OFFLINE_MS);
-    } finally {
-      if (mountedRef.current) setLoading(false);
-    }
-  }, []); // deps rỗng — an toàn vì dùng ref
+  try {
+    const streams = await api.getStreams();
+    // Server đã probe qua file mtime — không cần client probe nữa
+    setCameras(streams);
+    setServerOk(true);
+    setError(null);
+    const hasLive = streams.some(c => c.live);
+    timerRef.current = setTimeout(
+      () => fetchRef.current?.(),
+      hasLive ? 10_000 : 20_000
+    );
+  } catch {
+    setError('Cannot reach server. Retrying...');
+    setServerOk(false);
+    timerRef.current = setTimeout(() => fetchRef.current?.(), 15_000);
+  } finally {
+    if (mountedRef.current) setLoading(false);
+  }
+}, []);
 
   // Cập nhật ref mỗi khi hàm thay đổi
   useEffect(() => { fetchRef.current = fetchAndProbe; }, [fetchAndProbe]);
